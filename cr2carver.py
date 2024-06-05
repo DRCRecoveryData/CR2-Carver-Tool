@@ -1,64 +1,75 @@
 import binascii
 import os
+import concurrent.futures
 
-def find_cr2_files(input_file, output_dir):
-    cr2_signature = binascii.unhexlify('49492A0010000000')  # CR2 file signature in hexadecimal
-
-    with open(input_file, 'rb') as f:
-        file_size = os.path.getsize(input_file)
-
-        # Read the entire file into memory for faster processing
-        data = f.read()
-
-    index = 0
+def find_cr2_files_in_segment(data, start_index, file_size, cr2_signature):
+    extracted_files = []
+    index = start_index
     file_number = 1
 
     while True:
-        # Find the next occurrence of CR2 file header
         index = data.find(cr2_signature, index)
-        if index == -1:
+        if index == -1 or index >= file_size:
             break
-        
-        # Determine the start and end positions of the CR2 file
+
         start_offset = index
         end_index = data.find(cr2_signature, start_offset + 1)
 
-        if end_index == -1:
-            end_offset = file_size  # If no next signature, take till end of file
+        if end_index == -1 or end_index >= file_size:
+            end_offset = file_size
         else:
             end_offset = end_index
 
-        # Extract the CR2 file data
         cr2_data = data[start_offset:end_offset]
 
-        # Generate filename based on offset
         offset_hex = hex(start_offset)
-        output_filename = f'0x{offset_hex[2:].zfill(8)}.CR2'  # Example: 0x12345678.cr2
+        output_filename = f'0x{offset_hex[2:].zfill(8)}.CR2'
 
-        # Write the CR2 file to output directory
-        output_file = os.path.join(output_dir, output_filename)
-        with open(output_file, 'wb') as cr2_file:
-            cr2_file.write(cr2_data)
+        extracted_files.append((output_filename, cr2_data))
 
-        print(f'Extracted CR2 file {file_number} to {output_file}')
-
-        # Move index forward to search for the next CR2 file
         index = end_offset
         file_number += 1
 
+    return extracted_files
+
+def save_extracted_files(output_dir, extracted_files):
+    for filename, data in extracted_files:
+        output_file = os.path.join(output_dir, filename)
+        with open(output_file, 'wb') as cr2_file:
+            cr2_file.write(data)
+        print(f'Extracted CR2 file to {output_file}')
+
+def find_cr2_files(input_file, output_dir):
+    cr2_signature = binascii.unhexlify('49492A0010000000')
+
+    with open(input_file, 'rb') as f:
+        data = f.read()
+
+    file_size = len(data)
+    segment_size = file_size // os.cpu_count()
+
+    futures = []
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for i in range(os.cpu_count()):
+            start_index = i * segment_size
+            end_index = (i + 1) * segment_size if i != os.cpu_count() - 1 else file_size
+            futures.append(executor.submit(find_cr2_files_in_segment, data, start_index, end_index, cr2_signature))
+
+        all_extracted_files = []
+        for future in concurrent.futures.as_completed(futures):
+            all_extracted_files.extend(future.result())
+
+    save_extracted_files(output_dir, all_extracted_files)
+
 if __name__ == "__main__":
-    # Prompt user for input file path
     input_file = input("Enter the path to the binary image file containing CR2 files: ").strip()
 
-    # Ensure the input file exists
     if not os.path.isfile(input_file):
         print(f"Error: File '{input_file}' not found.")
         exit(1)
 
-    # Create output directory
-    output_dir = 'Carved'  # Replace with your desired output directory
+    output_dir = 'Carved'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # Call function to find and extract CR2 files
     find_cr2_files(input_file, output_dir)
