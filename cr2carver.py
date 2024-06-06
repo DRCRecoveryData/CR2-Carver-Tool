@@ -22,8 +22,8 @@ def find_cr2_files_in_segment(data, start_index, file_size, cr2_signature):
 
         cr2_data = data[start_offset:end_offset]
 
-        offset_hex = hex(start_offset)
-        output_filename = f'0x{offset_hex[2:].zfill(8)}.CR2'
+        # Format file_number with leading zeros to six digits
+        output_filename = f'{file_number:06d}.CR2'
 
         extracted_files.append((output_filename, cr2_data))
 
